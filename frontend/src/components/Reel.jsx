@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './Reel.css';
-import { IoChatbubbleOutline, IoShareSocialOutline } from 'react-icons/io5';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import backgroundImage from '../images/ss.png';
 
 function Reel() {
   const [products, setProducts] = useState([]);
@@ -12,17 +11,15 @@ function Reel() {
   const [likes, setLikes] = useState([]);
   const [likeCounts, setLikeCounts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [topSimilarProducts, setTopSimilarProducts] = useState([]);
+  const [scrolling, setScrolling] = useState(false);
 
   useEffect(() => {
-    // Fetch userId from localStorage
     const userId = localStorage.getItem('userId');
     if (!userId) {
       console.error('User ID not found in localStorage');
-      // Optionally handle this case, such as redirecting to login
     }
-    // Use userId as needed in your component
 
-    // Load likes from localStorage on component mount
     const likedProducts = JSON.parse(localStorage.getItem('likedProducts')) || {};
     const initialLikes = products.map(product => likedProducts[product._id]);
     setLikes(initialLikes);
@@ -43,42 +40,32 @@ function Reel() {
   }, []);
 
   const handleDoubleClick = () => {
-    // Fetch userId from localStorage
     const userId = localStorage.getItem('userId');
     if (!userId) {
       console.error('User ID not found in localStorage');
-      // Optionally handle this case, such as redirecting to login
       return;
     }
 
-    // Get the productId of the current product
     const productId = products[currentIndex]._id;
 
-    // Make an axios request to update the like status
     axios.put(`http://localhost:5000/api/products/${productId}/likes`, { action: 'like', userId })
       .then(response => {
-        // Assuming the response.data returns the updated product object
         const updatedProduct = response.data;
 
-        // Update likes state based on the updated product
         const newLikes = [...likes];
-        newLikes[currentIndex] = true; // Assuming marking as liked
+        newLikes[currentIndex] = true;
         setLikes(newLikes);
 
-        // Update likeCounts state based on the updated product
         const newLikeCounts = [...likeCounts];
         newLikeCounts[currentIndex] = updatedProduct.likes;
         setLikeCounts(newLikeCounts);
 
-        // Update localStorage with liked product
         const likedProducts = JSON.parse(localStorage.getItem('likedProducts')) || {};
         likedProducts[productId] = true;
         localStorage.setItem('likedProducts', JSON.stringify(likedProducts));
 
-        // Show success toast notification
         toast.success('You have liked this product!');
 
-        // Make another axios request to add product to user's liked products
         axios.put(`http://localhost:5000/api/users/${userId}/liked-products/${productId}`)
           .then(userResponse => {
             // Handle success if needed
@@ -88,6 +75,8 @@ function Reel() {
             toast.error('Failed to add product to user\'s liked products');
           });
 
+        // Reset top similar products after a like
+        setTopSimilarProducts([]);
       })
       .catch(error => {
         console.error('Error updating like count:', error);
@@ -95,44 +84,100 @@ function Reel() {
       });
   };
 
-  const handleScroll = () => {
-    if (products.length > 0) {
-      const nextIndex = (currentIndex + 1) % products.length;
-
-      // Smooth scrolling effect with 2 seconds transition
-      setTimeout(() => {
-        setCurrentIndex(nextIndex);
-      }, 500); // Adjust the timeout duration to 2000 milliseconds (2 seconds)
+  const computeCosineSimilarity = (vecA, vecB) => {
+    if (!Array.isArray(vecA) || !Array.isArray(vecB)) {
+      return 0;
     }
+    const dotProduct = vecA.reduce((sum, a, idx) => sum + a * (vecB[idx] || 0), 0);
+    const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
+    const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
+    return magnitudeA && magnitudeB ? dotProduct / (magnitudeA * magnitudeB) : 0;
   };
 
-  useEffect(() => {
-    const handleWheel = () => {
-      handleScroll();
-    };
+  const similarityMatrix = products.map((productA) =>
+    products.map((productB) =>
+      computeCosineSimilarity(productA.features, productB.features)
+    )
+  );
 
+  const getRecommendedProduct = useCallback((currentIndex, likedProducts, similarityMatrix) => {
+    if (topSimilarProducts.length > 0) {
+      return topSimilarProducts.shift();
+    }
+
+    const likedProductIndices = products.reduce((indices, product, idx) => {
+      if (likedProducts[product._id]) {
+        indices.push(idx);
+      }
+      return indices;
+    }, []);
+
+    const cumulativeSimilarities = products.map((_, idx) => {
+      return likedProductIndices.reduce((sum, likedIdx) => {
+        return sum + similarityMatrix[likedIdx][idx];
+      }, 0);
+    });
+
+    const filteredSimilarities = cumulativeSimilarities.map((similarity, idx) => 
+      likedProducts[products[idx]._id] ? -1 : similarity
+    );
+
+    const sortedIndices = filteredSimilarities
+      .map((similarity, idx) => ({ similarity, idx }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .map(({ idx }) => idx)
+      .slice(0, 5);
+
+    setTopSimilarProducts(sortedIndices.slice(1));
+    return sortedIndices[0] !== -1 ? sortedIndices[0] : (currentIndex + 1) % products.length;
+  }, [products, similarityMatrix, topSimilarProducts]);
+
+  const handleWheel = useCallback((event) => {
+    if (scrolling) return;
+    setScrolling(true);
+
+    setTimeout(() => {
+      setScrolling(false);
+    }, 500); // Adjust delay as needed to prevent rapid scrolling
+
+    if (event.deltaY > 0) {
+      // Scrolled downwards, move to the next product
+      // Get recommended product if scrolled to the end and user has liked at least one product
+      if (likes.some(liked => liked)) {
+        const nextRecommended = getRecommendedProduct(currentIndex, JSON.parse(localStorage.getItem('likedProducts')) || {}, similarityMatrix);
+        setCurrentIndex(nextRecommended);
+      }else{
+        const nextIndex = (currentIndex + 1) % products.length;
+        setCurrentIndex(nextIndex);
+      }
+    } else if (event.deltaY < 0) {
+      // Scrolled upwards, move to the previous product
+      const nextIndex = currentIndex === 0 ? products.length - 1 : currentIndex - 1;
+      setCurrentIndex(nextIndex);
+    }
+  }, [currentIndex, products.length, scrolling, getRecommendedProduct, similarityMatrix, likes]);
+
+  useEffect(() => {
     window.addEventListener('wheel', handleWheel);
 
     return () => {
       window.removeEventListener('wheel', handleWheel);
     };
-  }, [currentIndex, products.length]);
+  }, [handleWheel]);
 
-  if (loading) {
-    return <div>Loading...</div>;
-  }
+  const handleMouseMove = () => {
+    setScrolling(false);
+  };
 
-  if (products.length === 0) {
-    return <div>No products found</div>;
-  }
-
+  // Define currentProduct based on currentIndex and products array
   const currentProduct = products[currentIndex];
+
   if (!currentProduct) {
-    return <div>Product not found at currentIndex {currentIndex}</div>;
+    return <div>Loading...</div>; // or handle the loading state as per your design
   }
 
   return (
-    <div className=""  style={{ backgroundImage: "url('https://img.freepik.com/free-photo/fast-fashion-vs-slow-sustainable-fashion_23-2149133987.jpg?t=st=1720633085~exp=1720636685~hmac=d7b69771dbb039dc1054f82bbd2e2a2da5442d4fcc98acac5270a889ffe092c6&w=360') " }} >
+    <div className="" style={{ backgroundImage: "url('https://img.freepik.com/free-photo/fast-fashion-vs-slow-sustainable-fashion_23-2149133987.jpg?t=st=1720633085~exp=1720636685~hmac=d7b69771dbb039dc1054f82bbd2e2a2da5442d4fcc98acac5270a889ffe092c6&w=360')" }} onMouseMove={handleMouseMove}>
       <div className="flex justify-center items-center">
         <div className="relative w-72 h-[27rem] flex justify-center items-center overflow-hidden border-4 border-gold-500 rounded-lg shadow-md">
           <div className="" onDoubleClick={handleDoubleClick}>
@@ -155,13 +200,13 @@ function Reel() {
                 </div>
               </div>
 
-              <div className="text-2xl text-gray-800  mt-2 ml-4">
+              <div className="text-2xl text-gray-800 mt-2 ml-4">
                 💬
-                <div className=" mt-2 ml-2 font-normal text-white text-sm">101</div>
+                <div className="mt-2 ml-2 font-normal text-white text-sm">101</div>
               </div>
-              <div className="text-2xl text-gray-800  mt-4 ml-4">
+              <div className="text-2xl text-gray-800 mt-4 ml-4">
                 🛍️
-                <div className=" mt-2 ml-2 font-normal text-white text-sm">38</div>
+                <div className="mt-2 ml-2 font-normal text-white text-sm">38</div>
               </div>
             </div>
           </div>
