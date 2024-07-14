@@ -15,7 +15,7 @@ const SignUpForm = () => {
     try {
       await authService.register(email, password);
       toast.success('Signup successful!');
-      navigate('/reel');
+      navigate('/login');
     } catch (error) {
       setError(error.message); // Ensure error message is set properly
     }

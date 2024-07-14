@@ -1,5 +1,7 @@
+
+
 import React, { useState } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import SignUpForm from './components/SignUpForm';
@@ -31,17 +33,25 @@ function App() {
     navigate('/login'); // Navigate to /login after logout
   };
 
+  const PrivateRoute = ({ children }) => {
+    return loggedIn ? children : <Navigate to="/login" />;
+  };
+
   return (
-    
-    
-    <div className="App min-h-screen flex items-center justify-center " style={{ backgroundImage: "url('https://img.freepik.com/free-photo/fast-fashion-vs-slow-sustainable-fashion_23-2149133987.jpg?t=st=1720633085~exp=1720636685~hmac=d7b69771dbb039dc1054f82bbd2e2a2da5442d4fcc98acac5270a889ffe092c6&w=360') " }}>
-      
+    <div className="App min-h-screen flex items-center justify-center" style={{ backgroundImage: "url('https://img.freepik.com/free-photo/fast-fashion-vs-slow-sustainable-fashion_23-2149133987.jpg?t=st=1720633085~exp=1720636685~hmac=d7b69771dbb039dc1054f82bbd2e2a2da5442d4fcc98acac5270a889ffe092c6&w=360')" }}>
       <ToastContainer />
       
       <Routes>
         <Route path="/signup" element={<SignUpForm />} />
         <Route path="/login" element={<LoginForm onLoginSuccess={handleLoginSuccess} />} />
-        <Route path="/reel" element={<Reel />} />
+        <Route
+          path="/reel"
+          element={
+            <PrivateRoute>
+              <Reel />
+            </PrivateRoute>
+          }
+        />
         <Route
           path="/"
           element={
@@ -62,7 +72,6 @@ function App() {
           }
         />
       </Routes>
-    
     </div>
   );
 }
