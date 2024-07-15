@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './Reel.css';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -16,27 +15,29 @@ function Reel() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    if (!userId) {
-      console.error('User ID not found in localStorage');
-    }
 
-    const likedProducts = JSON.parse(localStorage.getItem('likedProducts')) || {};
-    const initialLikes = products.map(product => likedProducts[product._id]);
-    setLikes(initialLikes);
-  }, [products]);
-
-  useEffect(() => {
-    axios.get('http://localhost:5000/api/products')
-      .then(response => {
+    const fetchData = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/products');
         setProducts(response.data);
         const initialLikeCounts = response.data.map(product => product.likes);
         setLikeCounts(initialLikeCounts);
+
+        if (userId) {
+          const userResponse = await axios.get(`http://localhost:5000/api/users/${userId}/liked-products`);
+          const userLikedProducts = userResponse.data.likedProducts;
+          const initialLikes = response.data.map(product => userLikedProducts.includes(product._id));
+          setLikes(initialLikes);
+        }
+
         setLoading(false);
-      })
-      .catch(error => {
-        console.error('Error fetching products:', error);
+      } catch (error) {
+        console.error('Error fetching products or user data:', error);
         setLoading(false);
-      });
+      }
+    };
+
+    fetchData();
   }, []);
 
   const handleDoubleClick = () => {
@@ -47,6 +48,11 @@ function Reel() {
     }
 
     const productId = products[currentIndex]._id;
+
+    if (likes[currentIndex]) {
+      toast.info('You have already liked this product!');
+      return;
+    }
 
     axios.put(`http://localhost:5000/api/products/${productId}/likes`, { action: 'like', userId })
       .then(response => {
@@ -59,10 +65,6 @@ function Reel() {
         const newLikeCounts = [...likeCounts];
         newLikeCounts[currentIndex] = updatedProduct.likes;
         setLikeCounts(newLikeCounts);
-
-        const likedProducts = JSON.parse(localStorage.getItem('likedProducts')) || {};
-        likedProducts[productId] = true;
-        localStorage.setItem('likedProducts', JSON.stringify(likedProducts));
 
         toast.success('You have liked this product!');
 
@@ -118,7 +120,7 @@ function Reel() {
       }, 0);
     });
 
-    const filteredSimilarities = cumulativeSimilarities.map((similarity, idx) => 
+    const filteredSimilarities = cumulativeSimilarities.map((similarity, idx) =>
       likedProducts[products[idx]._id] ? -1 : similarity
     );
 
@@ -146,7 +148,7 @@ function Reel() {
       if (likes.some(liked => liked)) {
         const nextRecommended = getRecommendedProduct(currentIndex, JSON.parse(localStorage.getItem('likedProducts')) || {}, similarityMatrix);
         setCurrentIndex(nextRecommended);
-      }else{
+      } else {
         const nextIndex = (currentIndex + 1) % products.length;
         setCurrentIndex(nextIndex);
       }
@@ -169,11 +171,10 @@ function Reel() {
     setScrolling(false);
   };
 
-  // Define currentProduct based on currentIndex and products array
   const currentProduct = products[currentIndex];
 
-  if (!currentProduct) {
-    return <div>Loading...</div>; // or handle the loading state as per your design
+  if (loading) {
+    return <div>Loading...</div>;
   }
 
   return (

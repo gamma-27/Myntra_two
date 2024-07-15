@@ -41,7 +41,7 @@ router.get('/profile', async (req, res) => {
       email: user.email,
       // Add more user details as needed
     };
-    console.log(userProfile)
+   // console.log(userProfile)
 
     res.json(userProfile);
   } catch (error) {
